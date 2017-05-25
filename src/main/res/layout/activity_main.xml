@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+
+<com.lorien.wl.view.WLLayout xmlns:android="http://schemas.android.com/apk/res/android"
+                             android:id="@+id/wl"
+                             android:layout_width="match_parent"
+                             android:layout_height="match_parent">
+
+    <com.lorien.wl.view.MyWebView
+          android:id="@+id/webview"
+          android:layout_width="match_parent"
+          android:layout_height="match_parent"
+          android:overScrollMode="never"
+          android:scrollbars="none"
+    />
+    <com.lorien.wl.view.MyListView
+        android:id="@+id/list_view"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scrollbars="none"
+        android:overScrollMode="never">
+    </com.lorien.wl.view.MyListView>
+
+</com.lorien.wl.view.WLLayout>
