@@ -30,12 +30,18 @@ public class MyListView extends ListView {
     }
 
     public void flingY(int velocityY) {
-//        if (Build.VERSION.SDK_INT > Build.VERSION_CODES.LOLLIPOP) {
-//            fling(velocityY);
-//        } else {
-//
-//        }
-        mFlingRunnable.startFling(velocityY);
+        // 5.0
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            fling(velocityY);
+        }
+        // 4.4
+        else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+            mFlingRunnable.startFling(velocityY);
+        }
+        // 4.4 以下
+        else {
+            // TODO
+        }
     }
 
     private class FlingRunnable implements Runnable {
@@ -62,7 +68,7 @@ public class MyListView extends ListView {
             int delta = y - mLastFlingY;
             if (!finish) {
                 mLastFlingY = y;
-                // ListView自动滚动
+                // ListView滚动一段距离
                 MyListView.this.scrollListBy(delta);
                 post(this);
             } else {

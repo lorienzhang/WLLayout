@@ -1,8 +1,6 @@
 package com.lorien.wl.view;
 
 import android.content.Context;
-import android.os.Build;
-import android.support.annotation.RequiresApi;
 import android.util.AttributeSet;
 import android.util.Log;
 import android.view.MotionEvent;
@@ -12,10 +10,14 @@ import android.view.ViewConfiguration;
 import android.view.ViewGroup;
 import android.widget.AbsListView;
 import android.widget.ListAdapter;
+import android.widget.OverScroller;
 import android.widget.Scroller;
 
 import com.lorien.wl.R;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -164,6 +166,28 @@ public class WLLayout extends ViewGroup {
      * ListView的滚动监听
      */
     private AbsListView.OnScrollListener mListViewScrollLisenter;
+    /**
+     * ListView的滚动状态
+     */
+    private int mListViewScrollState;
+    /**
+     * 反射，强制停止ListView
+     */
+    private static Method mFlingEndMethod = null;
+    private static Field mFlingRunnableField = null;
+    static{
+        try {
+            mFlingRunnableField = AbsListView.class.getDeclaredField("mFlingRunnable");
+            mFlingRunnableField.setAccessible(true);
+            mFlingEndMethod = mFlingRunnableField.getType().getDeclaredMethod("endFling");
+            mFlingEndMethod.setAccessible(true);
+        } catch (Exception e) {
+            mFlingEndMethod = null;
+            mFlingRunnableField = null;
+        }
+    }
+
+    private OverScroller mScrollerReflectd;
 
     public WLLayout(Context context) {
         this(context, null);
@@ -181,8 +205,6 @@ public class WLLayout extends ViewGroup {
         mMaximumVelocity = ViewConfiguration.get(context).getScaledMaximumFlingVelocity();
     }
 
-
-    @RequiresApi(api = Build.VERSION_CODES.KITKAT)
     @Override
     public boolean dispatchTouchEvent(MotionEvent ev) {
         if (!isEnabled() || mWebView == null || mListView == null) {
@@ -226,6 +248,10 @@ public class WLLayout extends ViewGroup {
                 }
                 // 清空WVHolder列表
                 mWVholderList.clear();
+
+                if (mListViewScrollState == AbsListView.OnScrollListener.SCROLL_STATE_FLING) {
+                    stopListViewFling(mListView);
+                }
                 return super.dispatchTouchEvent(ev);
 
             case MotionEvent.ACTION_MOVE:
@@ -263,6 +289,22 @@ public class WLLayout extends ViewGroup {
                 break;
         }
         return super.dispatchTouchEvent(ev);
+    }
+
+    /**
+     * 反射方法，强制停止ListView滚动
+     * @param list
+     */
+    private void stopListViewFling(MyListView list) {
+        if (mFlingEndMethod != null) {
+            try {
+                mFlingEndMethod.invoke(mFlingRunnableField.get(list));
+            } catch (IllegalAccessException e) {
+                e.printStackTrace();
+            } catch (InvocationTargetException e) {
+                Log.d(TAG, "###method: stopListViewFling()###", new Throwable(e));
+            }
+        }
     }
 
     /**
@@ -314,7 +356,6 @@ public class WLLayout extends ViewGroup {
         mListView.offsetTopAndBottom(distanceY);
     }
 
-
     @Override
     protected void onFinishInflate() {
         super.onFinishInflate();
@@ -332,6 +373,24 @@ public class WLLayout extends ViewGroup {
 
         mListViewScrollLisenter = new ListViewScrollListener();
         mListView.setOnScrollListener(mListViewScrollLisenter);
+    }
+
+    private void reflectAbsListView() {
+        try {
+            Class<?> absListViewCls = Class.forName("android.widget.AbsListView");
+            Field mFlingRunnableField = absListViewCls.getDeclaredField("mFlingRunnable");
+            mFlingRunnableField.setAccessible(true);
+            Object mFlingRunnable = mFlingRunnableField.get(mListView);
+
+
+            Class<?> flingRunnableCls = Class.forName("android.widget.AbsListView$FlingRunnable");
+            Field mScrollerFeild = flingRunnableCls.getDeclaredField("mScroller");
+            mScrollerFeild.setAccessible(true);
+            mScrollerReflectd = (OverScroller) mScrollerFeild.get(mFlingRunnable);
+        } catch (Exception e) {
+            mScrollerReflectd = null;
+            Log.d(TAG, "###Exception Stack###", new Throwable(e));
+        }
     }
 
     /**
@@ -423,7 +482,7 @@ public class WLLayout extends ViewGroup {
      */
     private void onScrollCheckerFinish(int velocity) {
         if (mCurrentPos == POS_START) {
-            // KITKAT 4.4
+            // 存在版本兼容问题
             mListView.flingY(velocity);
         }
         if (mCurrentPos == POS_END) {
@@ -469,7 +528,7 @@ public class WLLayout extends ViewGroup {
     }
 
     /**
-     * Scroller控制器
+     * Tracker
      */
     class ScrollChecker implements Runnable {
 
@@ -633,6 +692,7 @@ public class WLLayout extends ViewGroup {
         @Override
         public void onScrollStateChanged(AbsListView view, int scrollState) {
             mScrollState = scrollState;
+            mListViewScrollState = scrollState;
             if (scrollState == SCROLL_STATE_IDLE) {
                 mPositionState = STATE_POS_NONE;
             }
@@ -643,6 +703,12 @@ public class WLLayout extends ViewGroup {
             if (mPositionState != STATE_POS_NONE) {
                 return;
             }
+
+            if (mScrollerReflectd == null) {
+                // 反射出AbsListView.FlingRunnable.OverScroller对象
+                reflectAbsListView();
+            }
+
             // ListView有header view
             if (mIsListViewHasHeader) {
                 if (firstVisibleItem == 1) {
@@ -675,7 +741,12 @@ public class WLLayout extends ViewGroup {
                 }
                 int initialVelocity = calcListViewTopVelocity(startTime, duration, mIsListViewHasHeader);
                 startTime = 0;
-                Log.d(TAG, "### calcListViewTopVelocity(): " + initialVelocity);
+                Log.d(TAG, "### when to top of ListView, curVelocity: " + initialVelocity);
+                // 如果能够成功反射出来OverScroll，就是用反射出来的加速度
+                if (mScrollerReflectd != null) {
+                    initialVelocity = (int) mScrollerReflectd.getCurrVelocity();
+                    Log.d(TAG, "### when to top of ListView, curVelocity reflected: " + initialVelocity);
+                }
                 if (Math.abs(initialVelocity) > mMinimumVelocity) {
                     flingWL(initialVelocity);
                 }
